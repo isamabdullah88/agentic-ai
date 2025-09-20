@@ -1,245 +1,156 @@
-"""
-assignment_quiz_generator.py
-
-A small Streamlit app that generates 2 assignment prompts and 3 multiple-choice
-questions (with options and answers) from a provided document or topic.
-
-Usage:
-    streamlit run assignment_quiz_generator.py
-
-Author: [Isam Balghari]
-"""
-
-from __future__ import annotations
-
-import re
-import random
-from collections import Counter
-from typing import List, Tuple
-
 import streamlit as st
+import json
+from quiz_generator import QuizGenerator
 
+# Initialize the quiz generator
+@st.cache_resource
+def get_quiz_generator():
+    return QuizGenerator()
 
-def split_sentences(text: str) -> List[str]:
-    """Split text into sentences using simple punctuation rules.
-
-    Args:
-        text: The input text to split.
-
-    Returns:
-        A list of non-empty sentences.
-    """
-    # Normalize whitespace and split on sentence-ending punctuation
-    text = re.sub(r"\s+", " ", text.strip())
-    parts = re.split(r"(?<=[.!?])\s+", text)
-    sentences = [p.strip() for p in parts if p.strip()]
-    return sentences
-
-
-def extract_keywords(text: str, top_n: int = 8) -> List[str]:
-    """Return a list of simple keywords (most frequent non-stop words).
-
-    This function uses a tiny built-in stopword list so you don't need
-    any external NLP libraries.
-
-    Args:
-        text: Input text to analyze.
-        top_n: Number of top keywords to return.
-
-    Returns:
-        A list of keywords sorted by frequency.
-    """
-    stopwords = {
-        "the",
-        "and",
-        "is",
-        "in",
-        "to",
-        "of",
-        "a",
-        "an",
-        "for",
-        "on",
-        "with",
-        "that",
-        "this",
-        "are",
-        "as",
-        "by",
-        "from",
-        "be",
-        "or",
-        "it",
-        "we",
-        "you",
-        "they",
-        "which",
-    }
-    words = re.findall(r"\b[a-zA-Z]{3,}\b", text.lower())
-    candidates = [w for w in words if w not in stopwords]
-    counts = Counter(candidates)
-    keywords = [w for w, _ in counts.most_common(top_n)]
-    return keywords
-
-
-def make_assignment_prompts(sentences: List[str], keywords: List[str]) -> List[str]:
-    """Generate two assignment-style essay prompts.
-
-    Strategy:
-    - Use long sentences (if available) to surface ideas.
-    - Use top keywords to build a comparative or exploratory prompt.
-
-    Args:
-        sentences: List of sentences from the text.
-        keywords: List of extracted keywords.
-
-    Returns:
-        Exactly two assignment prompt strings.
-    """
-    prompts: List[str] = []
-    long_sents = sorted(sentences, key=len, reverse=True)
-
-    if long_sents:
-        example = long_sents[0][:240].rstrip()
-        prompts.append(
-            f"Read the following excerpt and write a 800-1200 word essay: \"{example}\". "
-            "Discuss its main claims and implications, and relate them to broader "
-            "concepts from the document."
-        )
-    else:
-        prompts.append(
-            "Write an 800-1200 word essay summarising the main ideas of the "
-            "provided text, identifying two areas for further investigation."
-        )
-
-    # second prompt uses keywords to form a comparative / evaluative question
-    if len(keywords) >= 2:
-        k1, k2 = keywords[0], keywords[1]
-        prompts.append(
-            f"Compare and contrast the roles of '{k1}' and '{k2}' as presented in "
-            "the text. In your answer, evaluate strengths and weaknesses of the "
-            "arguments and suggest practical applications or experiments to test them."
-        )
-    else:
-        prompts.append(
-            "Identify two central themes from the document and critically evaluate "
-            "their significance. Provide examples and suggest follow-up questions."
-        )
-
-    return prompts
-
-
-def generate_mcqs(keywords: List[str]) -> List[Tuple[str, List[str], int]]:
-    """Create 3 multiple-choice questions from keywords.
-
-    Each question is a tuple: (question_text, options, index_of_correct).
-
-    Args:
-        keywords: List of keywords to use as correct answers.
-
-    Returns:
-        A list of three MCQs.
-    """
-    mcqs: List[Tuple[str, List[str], int]] = []
-    pool = keywords[:] or ["concept", "method", "result", "theory", "model"]
-
-    # Ensure we have enough distractors by using variations of keywords
-    all_terms = list(dict.fromkeys(pool + [k + "s" for k in pool]))
-    random.shuffle(all_terms)
-
-    for i in range(3):
-        correct = pool[i % len(pool)]
-        # build distractors
-        distractors = []
-        tries = 0
-        while len(distractors) < 3 and tries < 30:
-            candidate = random.choice(all_terms)
-            if candidate != correct and candidate not in distractors:
-                distractors.append(candidate)
-            tries += 1
-
-        options = distractors[:3] + [correct]
-        random.shuffle(options)
-        correct_index = options.index(correct)
-        question = (
-            f"Which of the following best describes the term '{correct}' as used "
-            "in the document?"
-        )
-        mcqs.append((question, options, correct_index))
-
-    return mcqs
-
-
-def format_mcq_display(mcqs: List[Tuple[str, List[str], int]]) -> str:
-    """Return a formatted string suitable for display with Streamlit.
-
-    Args:
-        mcqs: List of MCQ tuples.
-
-    Returns:
-        A multi-line string with questions, options and answers.
-    """
-    lines: List[str] = []
-    for i, (q, opts, ans_idx) in enumerate(mcqs, start=1):
-        lines.append(f"Q{i}. {q}")
-        for j, opt in enumerate(opts, start=1):
-            lines.append(f"   {chr(64+j)}. {opt}")
-        lines.append(f"   Answer: {chr(65+ans_idx)}")
-        lines.append("")
-    return "\n".join(lines)
-
-
-def generate_from_text(text: str) -> Tuple[List[str], List[Tuple[str, List[str], int]]]:
-    """Run the full lightweight pipeline: parse, extract, and generate.
-
-    Args:
-        text: Input document or topic string.
-
-    Returns:
-        A tuple (assignments, mcqs).
-    """
-    sentences = split_sentences(text)
-    keywords = extract_keywords(text, top_n=8)
-    assignments = make_assignment_prompts(sentences, keywords)
-    mcqs = generate_mcqs(keywords)
-    return assignments, mcqs
-
-
-def main() -> None:
-    """Streamlit front-end: accept input and show generated questions.
-
-    Run with: `streamlit run assignment_quiz_generator.py`.
-    """
-    st.set_page_config(page_title="Assignment & Quiz Generator")
-    st.title("Assignment & Quiz Generator")
-
-    st.write(
-        "Paste a document or a short topic description below. The app will "
-        "produce 2 assignment prompts and 3 multiple-choice questions."
+def main():
+    st.title("📚 Educational Assignment & Quiz Generator")
+    st.markdown("Generate assignments and quizzes from any document or topic using AI")
+    
+    # Initialize quiz generator
+    quiz_gen = get_quiz_generator()
+    
+    # Input section
+    st.header("📝 Input Content")
+    input_method = st.radio(
+        "Choose input method:",
+        ["Text Input", "Document Upload"],
+        horizontal=True
     )
-
-    text = st.text_area("Input document or topic", height=280)
-
-    if st.button("Generate"):
-        if not text.strip():
-            st.warning("Please provide some input text or a topic to continue.")
+    
+    content = ""
+    
+    if input_method == "Text Input":
+        content = st.text_area(
+            "Enter your document content or topic:",
+            height=200,
+            placeholder="Paste your document content here or describe a topic you want to create assignments about..."
+        )
+    else:
+        uploaded_file = st.file_uploader(
+            "Upload a document",
+            type=['txt', 'md'],
+            help="Currently supports text (.txt) and markdown (.md) files"
+        )
+        
+        if uploaded_file is not None:
+            try:
+                content = str(uploaded_file.read(), "utf-8")
+                st.success(f"Document loaded successfully! ({len(content)} characters)")
+                with st.expander("Preview uploaded content"):
+                    st.text(content[:500] + "..." if len(content) > 500 else content)
+            except Exception as e:
+                st.error(f"Error reading file: {str(e)}")
+    
+    # Generation section
+    if st.button("🎯 Generate Assignments & Quiz", type="primary", disabled=not content.strip()):
+        if not content.strip():
+            st.warning("Please provide some content to generate assignments from.")
             return
-
-        assignments, mcqs = generate_from_text(text)
-
-        st.header("Assignment Prompts (2)")
-        for idx, p in enumerate(assignments, start=1):
-            st.markdown(f"**Assignment {idx}:** {p}")
-
-        st.header("Multiple Choice Quiz (3)")
-        for idx, (q, opts, ans_idx) in enumerate(mcqs, start=1):
-            st.markdown(f"**Q{idx}.** {q}")
-            for j, opt in enumerate(opts, start=1):
-                st.write(f"- {chr(64+j)}. {opt}")
-            st.info(f"Correct answer: {chr(65+ans_idx)}")
-
-        st.success("Generation complete. Edit the input and re-click Generate to try again.")
-
+            
+        with st.spinner("Generating educational content..."):
+            try:
+                # Generate assignments and quiz
+                result = quiz_gen.generate_educational_content(content)
+                
+                if result:
+                    # Store in session state for persistence
+                    st.session_state.generated_content = result
+                    st.success("Content generated successfully!")
+                else:
+                    st.error("Failed to generate content. Please try again.")
+                    
+            except Exception as e:
+                st.error(f"Error generating content: {str(e)}")
+    
+    # Display generated content
+    if hasattr(st.session_state, 'generated_content') and st.session_state.generated_content:
+        result = st.session_state.generated_content
+        
+        st.divider()
+        
+        # Assignment Questions Section
+        st.header("📋 Assignment Questions")
+        st.markdown("*Essay prompts and discussion questions*")
+        
+        for i, assignment in enumerate(result.get('assignments', []), 1):
+            with st.container():
+                st.subheader(f"Assignment {i}")
+                st.write(assignment['question'])
+                if 'guidance' in assignment:
+                    with st.expander("📖 Guidance & Tips"):
+                        st.write(assignment['guidance'])
+                st.divider()
+        
+        # Quiz Section
+        st.header("🧠 Multiple Choice Quiz")
+        st.markdown("*Test your understanding with these questions*")
+        
+        quiz_answers = {}
+        
+        for i, question in enumerate(result.get('quiz', []), 1):
+            with st.container():
+                st.subheader(f"Question {i}")
+                st.write(question['question'])
+                
+                # Create radio buttons for options
+                answer_key = f"quiz_{i}"
+                selected_option = st.radio(
+                    "Choose your answer:",
+                    question['options'],
+                    key=answer_key,
+                    index=None
+                )
+                
+                if selected_option:
+                    quiz_answers[i] = {
+                        'selected': selected_option,
+                        'correct': question['correct_answer'],
+                        'is_correct': selected_option == question['correct_answer']
+                    }
+                
+                st.divider()
+        
+        # Quiz Results
+        if quiz_answers and len(quiz_answers) == len(result.get('quiz', [])):
+            st.header("📊 Quiz Results")
+            
+            correct_count = sum(1 for answer in quiz_answers.values() if answer['is_correct'])
+            total_questions = len(quiz_answers)
+            score_percentage = (correct_count / total_questions) * 100
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Correct Answers", f"{correct_count}/{total_questions}")
+            with col2:
+                st.metric("Score", f"{score_percentage:.1f}%")
+            with col3:
+                if score_percentage >= 80:
+                    st.success("Excellent! 🎉")
+                elif score_percentage >= 60:
+                    st.info("Good job! 👍")
+                else:
+                    st.warning("Keep studying! 📚")
+            
+            # Detailed feedback
+            st.subheader("Answer Review")
+            for i, answer_data in quiz_answers.items():
+                question_data = result['quiz'][i-1]
+                
+                if answer_data['is_correct']:
+                    st.success(f"Question {i}: Correct! ✅")
+                else:
+                    st.error(f"Question {i}: Incorrect ❌")
+                    st.write(f"Your answer: {answer_data['selected']}")
+                    st.write(f"Correct answer: {answer_data['correct']}")
+                
+                if 'explanation' in question_data:
+                    with st.expander(f"Explanation for Question {i}"):
+                        st.write(question_data['explanation'])
 
 if __name__ == "__main__":
     main()
