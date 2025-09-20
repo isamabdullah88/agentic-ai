@@ -7,7 +7,7 @@ from openai import OpenAI
 class QuizGenerator:
     def __init__(self):
         """Initialize the quiz generator with OpenAI client."""
-        self.api_key = os.getenv("OPENAI_API_KEY")
+        self.api_key = os.getenv("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")
         if not self.api_key:
             raise ValueError("OPENAI_API_KEY environment variable is required")
         
